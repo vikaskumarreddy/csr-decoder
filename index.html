@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSR Decoder</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/forge/0.10.0/forge.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f7f7f7;
+            color: #333;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        textarea {
+            width: 100%;
+            max-width: 600px;
+            margin: 20px 0;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #fff;
+        }
+
+        button {
+            display: block;
+            width: 200px;
+            padding: 10px;
+            margin: 20px auto;
+            background-color: #4CAF50;
+            color: white;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        .decoded-output {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            max-width: 800px;
+            margin: 0 auto;
+            font-family: monospace;
+        }
+
+        .decoded-output h2 {
+            margin-top: 0;
+            font-size: 24px;
+        }
+
+        .decoded-output .detail {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .decoded-output .detail:last-child {
+            border-bottom: none;
+        }
+
+        .detail-title {
+            font-weight: bold;
+            color: #333;
+            width: 30%;
+        }
+
+        .detail-value {
+            color: #555;
+            width: 65%;
+            word-wrap: break-word;
+        }
+
+        .subject-table {
+            width: 100%;
+            margin: 20px 0;
+            border-collapse: collapse;
+        }
+
+        .subject-table th,
+        .subject-table td {
+            padding: 8px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+
+        .subject-table th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+
+        .subject-table td {
+            background-color: #fff;
+        }
+
+        .error {
+            color: red;
+            text-align: center;
+            padding: 10px;
+            background-color: #f8d7da;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>CSR Decoder</h1>
+    <textarea id="csrInput" rows="10" placeholder="Paste your CSR here..."></textarea><br>
+    <button id="decodeButton">Decode CSR</button>
+
+    <div id="decodedOutput" class="decoded-output"></div>
+
+    <script>
+        document.getElementById('decodeButton').addEventListener('click', function() {
+            const csrInput = document.getElementById('csrInput').value.trim();
+
+            // Check if the input is in PEM format
+            if (!csrInput.startsWith("-----BEGIN CERTIFICATE REQUEST-----") || !csrInput.endsWith("-----END CERTIFICATE REQUEST-----")) {
+                document.getElementById('decodedOutput').innerHTML = '<div class="error">Invalid CSR format. Please ensure it starts with "-----BEGIN CERTIFICATE REQUEST-----" and ends with "-----END CERTIFICATE REQUEST-----".</div>';
+                return;
+            }
+
+            try {
+                // Remove the PEM header and footer
+                const pemBody = csrInput
+                    .replace(/-----BEGIN CERTIFICATE REQUEST-----/g, "")
+                    .replace(/-----END CERTIFICATE REQUEST-----/g, "")
+                    .replace(/\s/g, ""); // Remove whitespace
+
+                // Decode Base64 to binary
+                const binaryDerString = window.atob(pemBody);
+                const binaryLen = binaryDerString.length;
+                const bytes = new Uint8Array(binaryLen);
+                for (let i = 0; i < binaryLen; i++) {
+                    bytes[i] = binaryDerString.charCodeAt(i);
+                }
+
+                // Convert to Forge buffer
+                const asn1 = forge.asn1.fromDer(forge.util.createBuffer(bytes));
+                const certificationRequest = forge.pki.certificationRequestFromAsn1(asn1);
+
+                let output = '';
+
+                // Subject
+                output += '<h2>Subject:</h2>';
+                output += '<table class="subject-table">';
+                certificationRequest.subject.attributes.forEach(attr => {
+                    output += `
+                        <tr>
+                            <th>${attr.name}</th>
+                            <td>${attr.value}</td>
+                        </tr>
+                    `;
+                });
+                output += '</table>';
+
+                // Public Key
+                const publicKey = certificationRequest.publicKey;
+                output += generateDetail("Public Key", forge.pki.publicKeyToPem(publicKey));
+
+                // Key Size (for RSA and EC)
+                let keySize = '';
+                if (publicKey.n) {
+                    // RSA key size
+                    keySize = publicKey.n.bitLength();
+                } else if (publicKey.curve) {
+                    // EC key size (in bits, based on the curve)
+                    const curveName = publicKey.curve.name;
+                    keySize = (curveName === 'P-256') ? 256 :
+                              (curveName === 'P-384') ? 384 :
+                              (curveName === 'P-521') ? 521 : 'Unknown EC curve';
+                } else {
+                    keySize = 'Unknown key type';
+                }
+                output += generateDetail("Key Size", `${keySize} bits`);
+
+                // Signature Algorithm
+                output += generateDetail("Signature Algorithm", certificationRequest.signatureAlgorithmOid);
+
+                // Signature
+                output += generateDetail("Signature", forge.util.bytesToHex(certificationRequest.signature).toUpperCase());
+
+                // Extensions (if any)
+                if (certificationRequest.extensions && certificationRequest.extensions.length > 0) {
+                    output += '<h3>Extensions:</h3>';
+                    certificationRequest.extensions.forEach((ext, idx) => {
+                        output += generateDetail(`Extension ${idx + 1} OID`, ext.id);
+                        output += generateDetail(`Extension ${idx + 1} Value`, forge.util.bytesToHex(ext.value).toUpperCase());
+                    });
+                } else {
+                    output += generateDetail("Extensions", "No extensions found.");
+                }
+
+                // Version (CSR Version)
+                output += generateDetail("Version", certificationRequest.version);
+
+                document.getElementById('decodedOutput').innerHTML = output;
+
+            } catch (error) {
+                document.getElementById('decodedOutput').innerHTML = `<div class="error">Error decoding CSR: ${error.message}</div>`;
+            }
+        });
+
+        // Function to generate each detail in the UI
+        function generateDetail(title, value) {
+            return `
+                <div class="detail">
+                    <div class="detail-title">${title}:</div>
+                    <div class="detail-value">${value}</div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
