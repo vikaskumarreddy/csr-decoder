@@ -11,22 +11,33 @@
             margin: 20px;
             background-color: #f7f7f7;
             color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            text-align: center;
         }
+
 
         h1 {
             text-align: center;
         }
 
-        textarea {
+        .textarea-container {
             width: 100%;
             max-width: 600px;
-            margin: 20px 0;
+        }
+
+        textarea {
+            width: 100%;
             padding: 10px;
             font-family: monospace;
             font-size: 14px;
             border: 1px solid #ccc;
             border-radius: 5px;
             background-color: #fff;
+            box-sizing: border-box;
         }
 
         button {
@@ -118,7 +129,9 @@
 </head>
 <body>
     <h1>CSR Decoder</h1>
+	<div class="textarea-container">
     <textarea id="csrInput" rows="10" placeholder="Paste your CSR here..."></textarea><br>
+	</div>
     <button id="decodeButton">Decode CSR</button>
 
     <div id="decodedOutput" class="decoded-output"></div>
